@@ -140,7 +140,41 @@ public class BannerService extends AccessibilityService {
         public void onServiceDisconnected(ComponentName n) { metrics = null; Log.i(TAG, "metrics service disconnected"); }
     };
 
+    static final int TX_UPDATE_METRICS3 = 10;  // updateMetrics3(app, activity, timeMs, json)
+    static final String[] HEARTBEAT_ACTIVITIES = {"LiveChatXR.a", "LiveChatXR.b"};
+
+    // Metrics heartbeat: registers this app as active (MultiAppManager, valid for 2 s) and gives it a
+    // HistoryRecord, which the service needs before it will show our debug string. Two activity names,
+    // because multi-app mode needs more than two active app/activity pairs (plus the foreground game).
+    private final Runnable heartbeat = new Runnable() {
+        public void run() {
+            if (metrics != null) {
+                for (String act : HEARTBEAT_ACTIVITIES) {
+                    Parcel d = Parcel.obtain(), r = Parcel.obtain();
+                    try {
+                        d.writeInterfaceToken(METRICS_IFACE);
+                        d.writeString(getPackageName());
+                        d.writeString(act);
+                        d.writeLong(System.currentTimeMillis());
+                        d.writeString("{}");
+                        metrics.transact(TX_UPDATE_METRICS3, d, r, 0);
+                        r.readException();
+                        if (r.readInt() == 0) Log.w(TAG, "heartbeat rejected for " + act);
+                    } catch (Exception e) {
+                        Log.e(TAG, "heartbeat failed", e);
+                    } finally {
+                        d.recycle();
+                        r.recycle();
+                    }
+                }
+            }
+            handler.postDelayed(this, 1000);
+        }
+    };
+    private boolean heartbeatOn = false;
+
     private void ovr(String text, String asPackage) {
+        if (!heartbeatOn) { heartbeatOn = true; handler.post(heartbeat); Log.i(TAG, "metrics heartbeat started"); }
         if (metrics != null) { sendOvr(text, asPackage); return; }
         pending = new String[] {text, asPackage};
         Intent i = new Intent().setComponent(new ComponentName(METRICS_PKG, METRICS_PKG + ".MetricsService"));
@@ -162,7 +196,7 @@ public class BannerService extends AccessibilityService {
             try {
                 d.writeInterfaceToken(METRICS_IFACE);
                 d.writeString(pkg);
-                if (tx == TX_SET_OVERLAY2) d.writeString("BannerService");
+                if (tx == TX_SET_OVERLAY2) d.writeString(HEARTBEAT_ACTIVITIES[0]);
                 d.writeLong(System.currentTimeMillis());
                 d.writeString(text);
                 metrics.transact(tx, d, r, 0);
