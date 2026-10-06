@@ -2,6 +2,10 @@ package com.livechatxr.probe;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.os.IBinder;
+import android.os.Parcel;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -26,6 +30,7 @@ import android.widget.TextView;
  *   am broadcast -a com.livechatxr.probe.SHOW --es text "hello"            (accessibility overlay)
  *   am broadcast -a com.livechatxr.probe.SHOW --es text "hi" --es mode app  (SYSTEM_ALERT_WINDOW overlay)
  *   am broadcast -a com.livechatxr.probe.SHOW --es text "hi" --ei display 7   (put it on a specific display)
+ *   am broadcast -a com.livechatxr.probe.SHOW --es text "hi" --es mode ovr [--es as <pkg>]  (OVR Metrics Tool overlay)
  *   am broadcast -a com.livechatxr.probe.STOP                               (stop the 20 s repeat)
  * Results go to logcat tag LCXRProbe.
  */
@@ -62,6 +67,10 @@ public class BannerService extends AccessibilityService {
                 return;
             }
             String text = i.getStringExtra("text");
+            if ("ovr".equals(i.getStringExtra("mode"))) {  // text into OVR Metrics Tool's overlay
+                ovr(text != null ? text : "LiveChat XR probe", i.getStringExtra("as"));
+                return;
+            }
             show(text != null ? text : "LiveChat XR probe", "app".equals(i.getStringExtra("mode")), i.getIntExtra("display", 0));
         }
     };
@@ -111,6 +120,62 @@ public class BannerService extends AccessibilityService {
             handler.postDelayed(hide, 7000);
         } catch (Exception e) {
             Log.e(TAG, "addView failed (" + (appOverlay ? "app" : "accessibility") + " overlay, display " + displayId + ")", e);
+        }
+    }
+
+    // ---- OVR Metrics Tool overlay text (Meta's metrics service; needs OVR Metrics Tool from the Store) ----
+    static final String METRICS_PKG = "com.oculus.ovrmonitormetricsservice";
+    static final String METRICS_IFACE = "com.oculus.metrics.OVRMonitorMetricsServiceInterface";
+    static final int TX_SET_OVERLAY = 6, TX_SET_OVERLAY2 = 13;  // setOverlayDebugString / ...2
+    static final long V3_MIN_SERVICE_VERSION = 480513431L;
+    private IBinder metrics;
+    private String[] pending;
+
+    private final ServiceConnection metricsConn = new ServiceConnection() {
+        public void onServiceConnected(ComponentName n, IBinder b) {
+            metrics = b;
+            Log.i(TAG, "metrics service connected");
+            if (pending != null) { sendOvr(pending[0], pending[1]); pending = null; }
+        }
+        public void onServiceDisconnected(ComponentName n) { metrics = null; Log.i(TAG, "metrics service disconnected"); }
+    };
+
+    private void ovr(String text, String asPackage) {
+        if (metrics != null) { sendOvr(text, asPackage); return; }
+        pending = new String[] {text, asPackage};
+        Intent i = new Intent().setComponent(new ComponentName(METRICS_PKG, METRICS_PKG + ".MetricsService"));
+        try {
+            Log.i(TAG, "bind metrics service: " + bindService(i, metricsConn, BIND_AUTO_CREATE));
+        } catch (Exception e) {
+            Log.e(TAG, "bind metrics service failed", e);
+        }
+    }
+
+    /** Raw binder call: (pkg, [activity,] timeMs, text) -> boolean. Tries the v2 call on new services, then v1. */
+    private void sendOvr(String text, String asPackage) {
+        long ver = 0;
+        try { ver = getPackageManager().getPackageInfo(METRICS_PKG, 0).getLongVersionCode(); } catch (Exception ignored) { }
+        String pkg = asPackage != null ? asPackage : getPackageName();
+        int[] order = ver >= V3_MIN_SERVICE_VERSION ? new int[] {TX_SET_OVERLAY2, TX_SET_OVERLAY} : new int[] {TX_SET_OVERLAY};
+        for (int tx : order) {
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken(METRICS_IFACE);
+                d.writeString(pkg);
+                if (tx == TX_SET_OVERLAY2) d.writeString("BannerService");
+                d.writeLong(System.currentTimeMillis());
+                d.writeString(text);
+                metrics.transact(tx, d, r, 0);
+                r.readException();
+                boolean ok = r.readInt() != 0;
+                Log.i(TAG, "overlay debug string tx " + tx + " as " + pkg + " (service v" + ver + ") -> " + ok + ": " + text);
+                if (ok) return;
+            } catch (Exception e) {
+                Log.e(TAG, "overlay debug string tx " + tx + " failed", e);
+            } finally {
+                d.recycle();
+                r.recycle();
+            }
         }
     }
 

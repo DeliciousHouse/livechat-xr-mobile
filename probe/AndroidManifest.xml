@@ -3,6 +3,7 @@
     package="com.livechatxr.probe" android:versionCode="1" android:versionName="0.1">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <queries><package android:name="com.oculus.ovrmonitormetricsservice" /></queries>
     <application android:label="LiveChat XR probe">
         <service android:name=".BannerService" android:exported="true"
             android:label="LiveChat XR banner probe"
