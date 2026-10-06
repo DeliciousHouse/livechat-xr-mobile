@@ -30,6 +30,21 @@ Meta controls the pop-up's look, position and duration (about 5 s); the app can'
 
 If mirrored pop-ups don't show in-game, a standalone version isn't possible today and this repo stays parked.
 
+## Finding: accessibility overlays are invisible on Quest (tested 2026-10-06)
+
+`probe/` is a minimal accessibility service, tested on a Quest 3 (Horizon OS, Android SDK 34).
+
+- Enabling it over adb works, and `TYPE_ACCESSIBILITY_OVERLAY` / `TYPE_APPLICATION_OVERLAY` windows are added
+  without error (`mHasSurface=true`, `isReadyForDisplay()=true`).
+- They land on **display 0 ("Built-in Screen")**, which Quest never shows. Everything visible in the headset is a
+  per-panel virtual display (`AndroidPanelLayer-…`, `MirrorRoot for …`) owned by Meta's shell apps.
+- Targeting those displays from the service fails: `DisplayManager.getDisplay()` returns null for every Meta panel
+  display (toast layer 7, system bar 2, control bar 32). They're private to their owner.
+
+So a third-party app can't put a banner over another app on Quest, whether through accessibility, draw-over-apps or
+sideloading. The remaining standalone options: an app panel placed beside the game using Quest multitasking (needs a
+test that the panel stays visible while the game has focus), or phone notification mirroring.
+
 ## Planned scope (after milestone 0)
 
 - Android first (Kotlin), iOS second

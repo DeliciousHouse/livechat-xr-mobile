@@ -6,6 +6,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.view.Display;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -23,6 +25,7 @@ import android.widget.TextView;
  * adb control:
  *   am broadcast -a com.livechatxr.probe.SHOW --es text "hello"            (accessibility overlay)
  *   am broadcast -a com.livechatxr.probe.SHOW --es text "hi" --es mode app  (SYSTEM_ALERT_WINDOW overlay)
+ *   am broadcast -a com.livechatxr.probe.SHOW --es text "hi" --ei display 7   (put it on a specific display)
  *   am broadcast -a com.livechatxr.probe.STOP                               (stop the 20 s repeat)
  * Results go to logcat tag LCXRProbe.
  */
@@ -30,7 +33,7 @@ public class BannerService extends AccessibilityService {
     static final String TAG = "LCXRProbe";
     static final String SHOW = "com.livechatxr.probe.SHOW", STOP = "com.livechatxr.probe.STOP";
 
-    private WindowManager wm;
+    private WindowManager wm, shownOn;
     private TextView view;
     private int count = 0;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -38,7 +41,7 @@ public class BannerService extends AccessibilityService {
     private final Runnable hide = new Runnable() {
         public void run() {
             if (view != null) {
-                try { wm.removeView(view); } catch (Exception ignored) { }
+                try { shownOn.removeView(view); } catch (Exception ignored) { }
                 view = null;
             }
         }
@@ -46,7 +49,7 @@ public class BannerService extends AccessibilityService {
 
     private final Runnable tick = new Runnable() {
         public void run() {
-            show("🎁 Probe banner #" + (++count) + ": accessibility overlay test", false);
+            show("🎁 Probe banner #" + (++count) + ": accessibility overlay test", false, 0);
             handler.postDelayed(this, 20000);
         }
     };
@@ -59,7 +62,7 @@ public class BannerService extends AccessibilityService {
                 return;
             }
             String text = i.getStringExtra("text");
-            show(text != null ? text : "LiveChat XR probe", "app".equals(i.getStringExtra("mode")));
+            show(text != null ? text : "LiveChat XR probe", "app".equals(i.getStringExtra("mode")), i.getIntExtra("display", 0));
         }
     };
 
@@ -74,10 +77,18 @@ public class BannerService extends AccessibilityService {
         handler.post(tick);
     }
 
-    private void show(String text, boolean appOverlay) {
+    private void show(String text, boolean appOverlay, int displayId) {
         hide.run();
         handler.removeCallbacks(hide);
-        TextView tv = new TextView(this);
+        Context ctx = this;
+        WindowManager target = wm;
+        if (displayId != 0) {  // Quest renders panels from per-panel virtual displays, not display 0
+            Display d = ((DisplayManager) getSystemService(DISPLAY_SERVICE)).getDisplay(displayId);
+            if (d == null) { Log.e(TAG, "no display " + displayId); return; }
+            ctx = createDisplayContext(d);
+            target = (WindowManager) ctx.getSystemService(WINDOW_SERVICE);
+        }
+        TextView tv = new TextView(ctx);
         tv.setText(text);
         tv.setTextSize(22);
         tv.setTextColor(0xFFFFFFFF);
@@ -93,12 +104,13 @@ public class BannerService extends AccessibilityService {
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         lp.y = 40;
         try {
-            wm.addView(tv, lp);
+            target.addView(tv, lp);
+            shownOn = target;
             view = tv;
-            Log.i(TAG, "shown (" + (appOverlay ? "app" : "accessibility") + " overlay): " + text);
+            Log.i(TAG, "shown (" + (appOverlay ? "app" : "accessibility") + " overlay, display " + displayId + "): " + text);
             handler.postDelayed(hide, 7000);
         } catch (Exception e) {
-            Log.e(TAG, "addView failed (" + (appOverlay ? "app" : "accessibility") + " overlay)", e);
+            Log.e(TAG, "addView failed (" + (appOverlay ? "app" : "accessibility") + " overlay, display " + displayId + ")", e);
         }
     }
 
