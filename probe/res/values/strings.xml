@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="desc">Test only: shows a chat-style banner to check whether accessibility overlays appear over VR games.</string>
+</resources>
