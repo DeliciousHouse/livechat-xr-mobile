@@ -41,6 +41,16 @@ If mirrored pop-ups don't show in-game, a standalone version isn't possible toda
 - Targeting those displays from the service fails: `DisplayManager.getDisplay()` returns null for every Meta panel
   display (toast layer 7, system bar 2, control bar 32). They're private to their owner.
 
+### Also tested: OVR Metrics Tool's overlay (2026-10-06)
+
+OVR Metrics Tool (a Meta-signed system app) draws a head-locked HUD over any app, and its public binder interface
+(`com.oculus.metrics.OVRMonitorMetricsServiceInterface`, `setOverlayDebugString` = tx 6/13) accepts text from any app.
+Findings from its code (v88):
+- Text is stored per sending app and returns `true`, but it is only drawn for the **monitored (foreground) app**.
+- Text from other apps is routed to `PerfDebugOverlay.Update(appName, activity, record, DebugEvent)` in multi-app mode,
+  and that method is an empty stub (`return-void`). The probe's `updateMetrics3` heartbeat does switch multi-app mode
+  on, but the text is still discarded. Spoofing the foreground package is rejected (caller check).
+
 So a third-party app can't put a banner over another app on Quest, whether through accessibility, draw-over-apps or
 sideloading. The remaining standalone options: an app panel placed beside the game using Quest multitasking (needs a
 test that the panel stays visible while the game has focus), or phone notification mirroring.
